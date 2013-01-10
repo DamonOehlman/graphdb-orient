@@ -10,7 +10,8 @@
   "dependencies": {
     "async": "0.1.x",
     "debug": "*",
-    "orientdb": "0.9.x"
+    "orientdb": "0.9.x",
+    "underscore": "1.4.x"
   },
   "devDependencies": {
     "mocha": "1.7.x"
