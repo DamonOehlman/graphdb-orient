@@ -109,7 +109,13 @@ exports.activateType = function(graph, definition, callback) {
 };
 
 /**
-## createNode(data, callback)
+## createLink
+*/
+exports.createLink = function(graph, data, callback) {
+};
+
+/**
+## createNode(graph, data, callback)
 */
 exports.createNode = function(graph, data, callback) {
 	var db = graph._db;
@@ -128,6 +134,31 @@ exports.createNode = function(graph, data, callback) {
 
 	// get the field values, without the type field
 	db.createVertex(_.omit(data, 'type'), { 'class': data.type }, callback);
+};
+
+/**
+## createEdge(graph, sourceId, targetId, data, callback)
+*/
+exports.createEdge = function(graph, sourceId, targetId, data, callback) {
+
+};
+
+/**
+## getNode(graph, id, nodeType, callback)
+*/
+exports.getNode = function(graph, id, nodeType, callback) {
+	var db = graph._db;
+
+	// if we don't have a db connection, abort the operation
+	if (! db) return callback(errors.NOT_CONNECTED);
+
+	// look for the node details
+    db.command(
+      'SELECT FROM ' + (nodeType || 'V') + ' WHERE id = "' + id + '"',
+      function(err, results) {
+      	callback(err, (results || [])[0]);
+      }
+    );
 };
 
 /**
