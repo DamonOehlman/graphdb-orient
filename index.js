@@ -4,8 +4,18 @@ var async = require('async'),
 		NOT_CONNECTED: 'Unable to perform operation on disconnected db'
 	},
 	orientdb = require('orientdb'),
+	orientParser = require('orientdb/lib/orientdb/connection/parser'),
 	commands = {},
-	_ = require('underscore');
+	_ = require('underscore'),
+    templates = {
+        update: 'UPDATE <%= type %> <%= sqlsets %> WHERE id = "<%= id %>"',
+        vertexCreate: 'CREATE VERTEX <%= type %> <%= sqlsets %>'
+    };
+
+// compile each of the templates
+_.each(templates, function(value, key) {
+    templates[key] = _.template(value);
+});
 
 /* define base types handler */
 
@@ -109,34 +119,6 @@ exports.activateType = function(graph, definition, callback) {
 };
 
 /**
-## createLink
-*/
-exports.createLink = function(graph, data, callback) {
-};
-
-/**
-## createNode(graph, data, callback)
-*/
-exports.createNode = function(graph, data, callback) {
-	var db = graph._db;
-
-	// if we don't have a db connection, abort the operation
-	if (! db) return callback(errors.NOT_CONNECTED);
-
-	// ensure we have data
-	data = data || {};
-
-	// if we don't have a type for the node, it will simply be of type V
-	data.type = data.type || 'V';
-
-	// run the insert statement on the graph
-	debug('creating a new node in the graph with data: ', data);
-
-	// get the field values, without the type field
-	db.createVertex(_.omit(data, 'type'), { 'class': data.type }, callback);
-};
-
-/**
 ## createEdge(graph, sourceId, targetId, data, callback)
 */
 exports.createEdge = function(graph, sourceId, targetId, data, callback) {
@@ -159,6 +141,36 @@ exports.getNode = function(graph, id, nodeType, callback) {
       	callback(err, (results || [])[0]);
       }
     );
+};
+
+/**
+## saveNode(graph, node, callback)
+*/
+exports.saveNode = function(graph, node, callback) {
+	var db = graph._db;
+
+	// if we don't have a db connection, abort the operation
+	if (! db) return callback(new Error(errors.NOT_CONNECTED));
+
+	// if we don't have node data, then report an invalid node
+	if (! node.data) return callback(new Error('A node object is require for a save operation'));
+
+	// look for an existing node
+	exports.getNode(graph, node.data.id, node.type, function(err, existing) {
+		var commandTemplate = templates[existing ? 'update' : 'vertexCreate'],
+            data = _.omit(node.data, existing ? ['id'] : []),
+            commandText = commandTemplate({
+                type: node.type,
+                sqlsets: orientParser.hashToSQLSets(data).sqlsets,
+                id: node.data.id
+            });
+
+		if (err) return callback(err);
+
+		// run the command
+		debug('running command: ' + commandText);
+		db.command(commandText, callback);
+	});
 };
 
 /**
