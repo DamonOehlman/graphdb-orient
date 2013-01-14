@@ -1,5 +1,6 @@
 var async = require('async'),
 	debug = require('debug')('graphdb-orient'),
+    orientDebug = require('debug')('orientdb'),
 	errors = {
 		NOT_CONNECTED: 'Unable to perform operation on disconnected db'
 	},
@@ -8,8 +9,17 @@ var async = require('async'),
 	commands = {},
 	_ = require('underscore'),
     templates = {
+        selectById: 'SELECT FROM <%= type %> WHERE id = "<%= id %>"',
+        selectEdge: 'SELECT FROM <%= type %> ' + 
+            'WHERE in.id = "<%= source.id %>" ' +
+            'AND out.id = "<%= target.id %>"',
+
         update: 'UPDATE <%= type %> <%= sqlsets %> WHERE id = "<%= id %>"',
-        vertexCreate: 'CREATE VERTEX <%= type %> <%= sqlsets %>'
+        vertexCreate: 'CREATE VERTEX <%= type %> <%= sqlsets %>',
+        edgeCreate: 'CREATE EDGE <%= type %> FROM ' + 
+            '(SELECT FROM <%= source.type %> WHERE id = "<%= source.id %>") TO ' + 
+            '(SELECT FROM <%= target.type %> WHERE id = "<%= target.id %>") ' + 
+            '<%= sqlsets %>'
     };
 
 // compile each of the templates
@@ -24,6 +34,7 @@ exports.defineBaseTypes = function(types) {
 
 	types.define('string');
 	types.define('uuid').alias('string');
+    types.define('float');
 };
 
 /**
@@ -88,58 +99,49 @@ exports.close = function(graph, callback) {
 /* operation definitions */
 
 /**
-## activateType(graph, definition, callback)
+## activateNodeType(graph, definition, callback)
 
-The activateType operation handler is used to ensure that a type has been
-properly defined within orient.  Within orient, there is a notion of classes
-that provide some aspect of types.
+The active node type is used to ensure the specified type definition exists
+within OrientDB and inherits from the `OGraphVertex` class (which is aliased to `V`).
 */
-exports.activateType = function(graph, definition, callback) {
-	var db = graph._db,
-		className = definition.type;
-
-	// if we don't have a db connection, abort the operation
-	if (! db) return callback(errors.NOT_CONNECTED);
-
-	// attempt to create the class
-	db.createClass(className, 'V', function(err) {
-        // if we encountered an error, let's flag that type as existing
-        // so we do not attempt to create it again
-        if (err) {
-        	definition.active = true;
-            return callback();
-        }
-
-        // execute the following commands in series
-        commands.series([
-            'CREATE PROPERTY ' + className + '.id STRING',
-            'CREATE INDEX ' + className + '.id UNIQUE'
-        ], db, callback);
-	});
+exports.activateNodeType = function(graph, definition, callback) {
+    activateType(graph, definition, 'OGraphVertex', callback);
 };
 
 /**
-## createEdge(graph, sourceId, targetId, data, callback)
-*/
-exports.createEdge = function(graph, sourceId, targetId, data, callback) {
+## activateEdgeType(graph, definition, callback)
 
+The activateEdgeType function is used to ensure the type has exists in OrientDB.
+*/
+exports.activateEdgeType = function(graph, definition, callback) {
+    activateType(graph, definition, 'OGraphEdge', callback);
 };
 
 /**
 ## getNode(graph, id, nodeType, callback)
 */
 exports.getNode = function(graph, id, nodeType, callback) {
-	var db = graph._db;
+    getById(graph, id, nodeType || 'OGraphVertex', callback);
+};
 
-	// if we don't have a db connection, abort the operation
-	if (! db) return callback(errors.NOT_CONNECTED);
+exports.getEdge = function(graph, source, target, edgeType, callback) {
+    var db = graph._db,
+        command = templates.selectEdge({
+            type: edgeType,
+            source: source,
+            target: target
+        });
 
-	// look for the node details
+    // if we don't have a db connection, abort the operation
+    if (! db) return callback(errors.NOT_CONNECTED);
+
+    // look for the node details
+    orientDebug(command);
     db.command(
-      'SELECT FROM ' + (nodeType || 'V') + ' WHERE id = "' + id + '"',
-      function(err, results) {
-      	callback(err, (results || [])[0]);
-      }
+        command,
+        function(err, results) {
+            callback(err, (results || [])[0]);
+        }
     );
 };
 
@@ -162,7 +164,7 @@ exports.saveNode = function(graph, node, callback) {
             commandText = commandTemplate({
                 type: node.type,
                 sqlsets: orientParser.hashToSQLSets(data).sqlsets,
-                id: node.data.id
+                id: existing && existing.id
             });
 
 		if (err) return callback(err);
@@ -172,6 +174,90 @@ exports.saveNode = function(graph, node, callback) {
 		db.command(commandText, callback);
 	});
 };
+
+exports.saveEdge = function(graph, source, target, entity, callback) {
+    var db = graph._db;
+
+    // if we don't have a db connection, abort the operation
+    if (! db) return callback(new Error(errors.NOT_CONNECTED));
+
+    // if we don't have node data, then report an invalid node
+    if (! entity.data) return callback(new Error('A valid entity is require for a save operation'));
+
+    // look for an existing node
+    exports.getEdge(graph, source, target, entity.type, function(err, existing) {
+        var commandTemplate = templates[existing ? 'update' : 'edgeCreate'],
+            data = _.omit(entity.data, existing ? ['id'] : []),
+            commandText = commandTemplate({
+                type: entity.type,
+                sqlsets: orientParser.hashToSQLSets(data).sqlsets,
+                source: source,
+                target: target,
+                id: existing && existing.id
+            });
+
+        if (err) return callback(err);
+
+        // run the command
+        orientDebug('running command: ' + commandText);
+        db.command(commandText, callback);
+    });
+};
+
+/* internal helper functions */
+
+/**
+## activateType(graph, definition, callback)
+
+The activateType operation handler is used to ensure that a type has been
+properly defined within orient.  Within orient, there is a notion of classes
+that provide some aspect of types.
+*/
+function activateType(graph, definition, baseClass, callback) {
+    var db = graph._db,
+        className = definition.type;
+
+    // if we don't have a db connection, abort the operation
+    if (! db) return callback(errors.NOT_CONNECTED);
+
+    // attempt to create the class
+    db.createClass(className, baseClass, function(err) {
+        // if we encountered an error, let's flag that type as existing
+        // so we do not attempt to create it again
+        if (err) {
+            definition.active = true;
+            return callback();
+        }
+
+        // execute the following commands in series
+        commands.series([
+            'CREATE PROPERTY ' + className + '.id STRING',
+            'CREATE INDEX ' + className + '.id UNIQUE'
+        ], db, callback);
+    });
+};
+
+/**
+## getById(graph, id, className, callback)
+
+The getById function is used internally to find a specific object by id.
+*/
+function getById(graph, id, className, callback) {
+    var db = graph._db,
+        command = templates.selectById({ type: className, id: id });
+
+    // if we don't have a db connection, abort the operation
+    if (! db) return callback(errors.NOT_CONNECTED);
+
+    // look for the node details
+    orientDebug(command);
+    db.command(
+        command,
+        function(err, results) {
+            callback(err, (results || [])[0]);
+        }
+    );
+}
 
 /**
 ## series(commands, targetDb, callback)
@@ -185,11 +271,12 @@ As per the series command, except the commands are executed in parallel
 */
 ['series', 'parallel'].forEach(function(op) {
     commands[op] = function(commands, targetDb, callback) {
-        debug('running commands: ', commands);
-
         // create the bound command calls
         var boundCommands = commands.map(function(command) {
-            return targetDb.command.bind(targetDb, command);
+            return function(commandCallback) {
+                orientDebug(command);
+                targetDb.command(command, commandCallback);
+            };
         });
 
         // execute the commands
