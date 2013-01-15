@@ -125,16 +125,32 @@ exports.activateEdgeType = function(graph, definition, callback) {
 };
 
 /**
-## getNode(graph, id, nodeType, callback)
+## find(graph, searchParams, opts, callback)
 */
-exports.getNode = function(graph, id, nodeType, callback) {
-    getById(graph, id, nodeType || 'OGraphVertex', callback);
+exports.find = function(graph, searchParams, opts, callback) {
+    // if an id has been requested and a type specified, then do a get by id
+    if (searchParams.id && searchParams.type) {
+        return findById(graph, searchParams.id, searchParams.type, callback);
+    }
+    // otherwise, if we have an id, but no type look for a graphvertex
+    // and then a graph edge if no vertex is found
+    else if (searchParams.id) {
+        // first look for a vertex
+        findById(graph, searchParams.id, 'OGraphVertex', function(err, results) {
+            if (err || results.length > 0) return callback(err, results);
+
+            // no hit on the vertex, so look for an edge
+            return findById(graph, searchParams.id, 'OGraphEdge', callback);
+        });
+    }
+
+    return callback(null, []);
 };
 
 exports.getEdge = function(graph, source, target, edgeType, callback) {
     var db = graph._db,
         command = templates.selectEdge({
-            type: edgeType,
+            type: edgeType || 'OGraphEdge',
             source: source,
             target: target
         });
@@ -164,12 +180,16 @@ exports.saveNode = function(graph, node, callback) {
     // if we don't have node data, then report an invalid node
     if (! node.data) return callback(new Error('A node object is require for a save operation'));
 
+    // if the node type is not defined, then create it
+    node.type = node.type || 'OGraphVertex';
+
     // look for an existing node
-    exports.getNode(graph, node.data.id, node.type, function(err, existing) {
-        var commandTemplate = templates[existing ? 'update' : 'vertexCreate'],
-            data = _.omit(node.data, existing ? ['id'] : []),
-            commandText = commandTemplate({
-                type: node.type,
+    findById(graph, node.data.id, node.type, function(err, results) {
+        var existing = (! err) && results.length > 0,
+            commandTemplate = templates[results.length > 0 ? 'update' : 'vertexCreate'],
+            data = _.omit(node.data, results.length > 0 ? ['id'] : []),
+                commandText = commandTemplate({
+                    type: node.type,
                 sqlsets: orientParser.hashToSQLSets(data).sqlsets,
                 id: existing && existing.id
             });
@@ -196,7 +216,7 @@ exports.saveEdge = function(graph, source, target, entity, callback) {
         var commandTemplate = templates[existing ? 'update' : 'edgeCreate'],
             data = _.omit(entity.data, existing ? ['id'] : []),
             commandText = commandTemplate({
-                type: entity.type,
+                type: entity.type || 'OGraphEdge',
                 sqlsets: orientParser.hashToSQLSets(data).sqlsets,
                 source: source,
                 target: target,
@@ -260,11 +280,11 @@ function debuggable(callback) {
 }
 
 /**
-## getById(graph, id, className, callback)
+## findById(graph, id, className, callback)
 
-The getById function is used internally to find a specific object by id.
+The findById function is used internally to find a specific object by id.
 */
-function getById(graph, id, className, callback) {
+function findById(graph, id, className, callback) {
     var db = graph._db,
         command = templates.selectById({ type: className, id: id });
 
@@ -276,7 +296,7 @@ function getById(graph, id, className, callback) {
     db.command(
         command,
         function(err, results) {
-            callback(err, (results || [])[0]);
+            callback(err, results || []);
         }
     );
 }
