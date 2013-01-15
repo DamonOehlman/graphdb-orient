@@ -1,24 +1,24 @@
 var async = require('async'),
-	debug = require('debug')('graphdb-orient'),
+    debug = require('debug')('graphdb-orient'),
     orientDebug = require('debug')('orientdb'),
-	errors = {
-		NOT_CONNECTED: 'Unable to perform operation on disconnected db'
-	},
-	orientdb = require('orientdb'),
-	orientParser = require('orientdb/lib/orientdb/connection/parser'),
-	commands = {},
-	_ = require('underscore'),
+    errors = {
+        NOT_CONNECTED: 'Unable to perform operation on disconnected db'
+    },
+    orientdb = require('orientdb'),
+    orientParser = require('orientdb/lib/orientdb/connection/parser'),
+    commands = {},
+    _ = require('underscore'),
     templates = {
         selectById: 'SELECT FROM <%= type %> WHERE id = "<%= id %>"',
-        selectEdge: 'SELECT FROM <%= type %> ' + 
+        selectEdge: 'SELECT FROM <%= type %> ' +
             'WHERE in.id = "<%= source.id %>" ' +
             'AND out.id = "<%= target.id %>"',
 
         update: 'UPDATE <%= type %> <%= sqlsets %> WHERE id = "<%= id %>"',
         vertexCreate: 'CREATE VERTEX <%= type %> <%= sqlsets %>',
-        edgeCreate: 'CREATE EDGE <%= type %> FROM ' + 
-            '(SELECT FROM <%= source.type %> WHERE id = "<%= source.id %>") TO ' + 
-            '(SELECT FROM <%= target.type %> WHERE id = "<%= target.id %>") ' + 
+        edgeCreate: 'CREATE EDGE <%= type %> FROM ' +
+            '(SELECT FROM <%= source.type %> WHERE id = "<%= source.id %>") TO ' +
+            '(SELECT FROM <%= target.type %> WHERE id = "<%= target.id %>") ' +
             '<%= sqlsets %>'
     };
 
@@ -30,10 +30,10 @@ _.each(templates, function(value, key) {
 /* define base types handler */
 
 exports.defineBaseTypes = function(types) {
-	debug('defining core types for orientdb connection');
+    debug('defining core types for orientdb connection');
 
-	types.define('string');
-	types.define('uuid').alias('string');
+    types.define('string');
+    types.define('uuid').alias('string');
     types.define('float');
 };
 
@@ -41,59 +41,66 @@ exports.defineBaseTypes = function(types) {
 ## connect(graph, opts, callback)
 */
 exports.connect = function(graph, opts, callback) {
-	var db, server;
+    var db, server;
 
-	// ensure we have valid opts
-	opts = opts || {};
+    // ensure we have valid opts
+    opts = opts || {};
 
-	// if we don't have server configuration details, trigger a callback
-	if (! opts.server) {
-		return callback(new Error('server connection details required to use orientdb connector'));
-	}
+    // wrap the callback to create a "debug" back
+    callback = debuggable(callback);
 
-	if (! opts.db) {
-		return callback(new Error('db name, username and password require to use orientdb connector'));
-	}
+    // if we don't have server configuration details, trigger a callback
+    if (! opts.server) {
+        return callback(new Error('server connection details required to use orientdb connector'));
+    }
 
-	// create the graph connection
-	server = graph._server = new orientdb.Server(opts.server);
+    if (! opts.db) {
+        return callback(new Error('db name, username and password require to use orientdb connector'));
+    }
 
-	// connect the server
-	server.connect(function(err) {
-		// create the db instance
-		db = graph._db = new orientdb.GraphDb(opts.db.name, server, opts.db);
+    // create the graph connection
+    server = graph._server = new orientdb.Server(opts.server);
 
-		// attempt to open the database
-		// and if that fails, attempt to create the db and then open it
-	    debug('attempting to open the ' + opts.db.name + ' db');
-	    db.open(function(err) {
-	        // if we had no error, then fire the callback and return
-	        if (! err) return callback();
+    // connect the server
+    debug('connecting to db server: (' + opts.server.host + ':' + opts.server.port + ')');
+    server.connect(function(err) {
+        // if we had an error connecting, then report the error
+        if (err) return callback(err);
 
-	        // otherwise, we need to attempt to create the db and then open it
-	        debug('unable to open db, attempting to create new db');
-	        async.series([
-	            db.create.bind(db),
-	            db.open.bind(db)
-	        ], callback);
-	    });	
-	});
+        // create the db instance
+        db = graph._db = new orientdb.GraphDb(opts.db.name, server, opts.db);
+
+        // attempt to open the database
+        // and if that fails, attempt to create the db and then open it
+        debug('db connection ok, attempting to open the ' + opts.db.name + ' db');
+        db.open(function(err) {
+            // if we had no error, then fire the callback and return
+            if (! err) return callback();
+
+            // otherwise, we need to attempt to create the db and then open it
+            debug('unable to open db, attempting to create new db', err);
+            async.series([
+                db.create.bind(db),
+                db.open.bind(db)
+            ], callback);
+        });
+    });
 };
 
 /**
 ## close(graph, callback)
 */
 exports.close = function(graph, callback) {
-	// if we have no db, then return the callback
-	if (! graph._db) return callback();
+    // if we have no db, then return the callback
+    if (! graph._db) return callback();
 
-	// close the database, and once done clear the _db member
-	graph._db.close(function() {
-		graph._db = undefined;
+    // close the database, and once done clear the _db member
+    graph._db.close(function() {
+        graph._db = undefined;
 
-		// pass the callback through
-		callback.apply(this, arguments);
-	});
+        // pass the callback through
+        callback.apply(this, arguments);
+    });
 };
 
 /* operation definitions */
@@ -149,17 +156,17 @@ exports.getEdge = function(graph, source, target, edgeType, callback) {
 ## saveNode(graph, node, callback)
 */
 exports.saveNode = function(graph, node, callback) {
-	var db = graph._db;
+    var db = graph._db;
 
-	// if we don't have a db connection, abort the operation
-	if (! db) return callback(new Error(errors.NOT_CONNECTED));
+    // if we don't have a db connection, abort the operation
+    if (! db) return callback(new Error(errors.NOT_CONNECTED));
 
-	// if we don't have node data, then report an invalid node
-	if (! node.data) return callback(new Error('A node object is require for a save operation'));
+    // if we don't have node data, then report an invalid node
+    if (! node.data) return callback(new Error('A node object is require for a save operation'));
 
-	// look for an existing node
-	exports.getNode(graph, node.data.id, node.type, function(err, existing) {
-		var commandTemplate = templates[existing ? 'update' : 'vertexCreate'],
+    // look for an existing node
+    exports.getNode(graph, node.data.id, node.type, function(err, existing) {
+        var commandTemplate = templates[existing ? 'update' : 'vertexCreate'],
             data = _.omit(node.data, existing ? ['id'] : []),
             commandText = commandTemplate({
                 type: node.type,
@@ -167,12 +174,12 @@ exports.saveNode = function(graph, node, callback) {
                 id: existing && existing.id
             });
 
-		if (err) return callback(err);
+        if (err) return callback(err);
 
-		// run the command
-		debug('running command: ' + commandText);
-		db.command(commandText, callback);
-	});
+        // run the command
+        debug('running command: ' + commandText);
+        db.command(commandText, callback);
+    });
 };
 
 exports.saveEdge = function(graph, source, target, entity, callback) {
@@ -235,7 +242,22 @@ function activateType(graph, definition, baseClass, callback) {
             'CREATE INDEX ' + className + '.id UNIQUE'
         ], db, callback);
     });
-};
+}
+
+/**
+## debuggable(callback)
+
+This is simple function that provides debug info on error conditions
+*/
+function debuggable(callback) {
+    return function(err) {
+        if (err instanceof Error) {
+            debug('error: ' + err.message);
+        }
+
+        callback.apply(this, arguments);
+    };
+}
 
 /**
 ## getById(graph, id, className, callback)
