@@ -130,21 +130,25 @@ exports.activateEdgeType = function(graph, definition, callback) {
 exports.find = function(graph, searchParams, opts, callback) {
     // if an id has been requested and a type specified, then do a get by id
     if (searchParams.id && searchParams.type) {
+        debug('searching by id, using type: ' + searchParams.type);
         return findById(graph, searchParams.id, searchParams.type, callback);
     }
     // otherwise, if we have an id, but no type look for a graphvertex
     // and then a graph edge if no vertex is found
     else if (searchParams.id) {
         // first look for a vertex
+        debug('searching by id but no type, looking for a vertex first');
         findById(graph, searchParams.id, 'OGraphVertex', function(err, results) {
             if (err || results.length > 0) return callback(err, results);
 
             // no hit on the vertex, so look for an edge
+            debug('could not locate vertex, looking for an edge');
             return findById(graph, searchParams.id, 'OGraphEdge', callback);
         });
     }
-
-    return callback(null, []);
+    else {
+        return callback(null, []);
+    }
 };
 
 exports.getEdge = function(graph, source, target, edgeType, callback) {
@@ -159,13 +163,9 @@ exports.getEdge = function(graph, source, target, edgeType, callback) {
     if (! db) return callback(errors.NOT_CONNECTED);
 
     // look for the node details
-    orientDebug(command);
-    db.command(
-        command,
-        function(err, results) {
-            callback(err, (results || [])[0]);
-        }
-    );
+    sendCommand(db, command, function(err, results) {
+        callback(err, (results || [])[0]);
+    });
 };
 
 /**
@@ -191,14 +191,13 @@ exports.saveNode = function(graph, node, callback) {
                 commandText = commandTemplate({
                     type: node.type,
                 sqlsets: orientParser.hashToSQLSets(data).sqlsets,
-                id: existing && existing.id
+                id: existing && results[0].id
             });
 
         if (err) return callback(err);
 
         // run the command
-        debug('running command: ' + commandText);
-        db.command(commandText, callback);
+        sendCommand(db, commandText, callback);
     });
 };
 
@@ -226,8 +225,7 @@ exports.saveEdge = function(graph, source, target, entity, callback) {
         if (err) return callback(err);
 
         // run the command
-        orientDebug('running command: ' + commandText);
-        db.command(commandText, callback);
+        sendCommand(db, commandText, callback);
     });
 };
 
@@ -292,13 +290,21 @@ function findById(graph, id, className, callback) {
     if (! db) return callback(errors.NOT_CONNECTED);
 
     // look for the node details
+    sendCommand(db, command, callback);
+}
+
+/**
+## sendCommand(db, command, callback)
+
+The sendCommand function is used internally to provide debug tracking on the commands
+send to orientdb
+*/
+function sendCommand(db, command, callback) {
     orientDebug(command);
-    db.command(
-        command,
-        function(err, results) {
-            callback(err, results || []);
-        }
-    );
+    db.command(command, function(err, results) {
+        if (err) orientDebug('error: ', err);
+        callback.apply(this, arguments);
+    });
 }
 
 /**
