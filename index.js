@@ -33,6 +33,7 @@ exports.defineBaseTypes = function(types) {
 
     types.define('string');
     types.define('uuid').alias('string');
+    types.define('integer');
     types.define('float');
 };
 
