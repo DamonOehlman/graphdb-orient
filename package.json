@@ -10,7 +10,7 @@
   "dependencies": {
     "async": "0.1.x",
     "debug": "*",
-    "orienteer": "git://github.com/DamonOehlman/orienteer.git",
+    "orienteer": "0.1.x",
     "underscore": "1.4.x"
   },
   "devDependencies": {
