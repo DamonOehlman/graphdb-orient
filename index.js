@@ -4,8 +4,7 @@ var async = require('async'),
     errors = {
         NOT_CONNECTED: 'Unable to perform operation on disconnected db'
     },
-    orientdb = require('orientdb'),
-    orientParser = require('orientdb/lib/orientdb/connection/parser'),
+    orienteer = require('orienteer'),
     commands = {},
     _ = require('underscore'),
     templates = {
@@ -41,7 +40,7 @@ exports.defineBaseTypes = function(types) {
 ## connect(graph, opts, callback)
 */
 exports.connect = function(graph, opts, callback) {
-    var db, server;
+    var connection;
 
     // ensure we have valid opts
     opts = opts || {};
@@ -50,40 +49,29 @@ exports.connect = function(graph, opts, callback) {
     callback = debuggable(callback);
 
     // if we don't have server configuration details, trigger a callback
-    if (! opts.server) {
-        return callback(new Error('server connection details required to use orientdb connector'));
+    if (! opts.protocol) {
+        return callback(new Error('server connection protocol required to use orientdb connector'));
     }
 
     if (! opts.db) {
         return callback(new Error('db name, username and password require to use orientdb connector'));
     }
 
-    // create the graph connection
-    server = graph._server = new orientdb.Server(opts.server);
+    // initialise the connection
+    connection = orienteer(opts);
 
-    // connect the server
-    debug('connecting to db server: (' + opts.server.host + ':' + opts.server.port + ')');
-    server.connect(function(err) {
-        // if we had an error connecting, then report the error
-        if (err) return callback(err);
+    // check that the required database exists
+    connection.dbExist({ name: opts.db }, function(err, result) {
+        if (err || (! result) || (! result.exists)) {
+            return new callback(err || new Error('Could not find db: ' + opts.db));
+        }
 
-        // create the db instance
-        db = graph._db = new orientdb.GraphDb(opts.db.name, server, opts.db);
+        // update the connection to use the admin user by default
+        graph._connection = connection = connection.as('admin');
 
-        // attempt to open the database
-        // and if that fails, attempt to create the db and then open it
-        debug('db connection ok, attempting to open the ' + opts.db.name + ' db');
-        db.open(function(err) {
-            // if we had no error, then fire the callback and return
-            if (! err) return callback();
-
-            // otherwise, we need to attempt to create the db and then open it
-            debug('unable to open db, attempting to create new db', err);
-            async.series([
-                db.create.bind(db),
-                db.open.bind(db)
-            ], callback);
-        });
+        // otherwise, use the db and trigger the callback
+        connection.db(opts.db);
+        callback();
     });
 };
 
@@ -92,15 +80,11 @@ exports.connect = function(graph, opts, callback) {
 */
 exports.close = function(graph, callback) {
     // if we have no db, then return the callback
-    if (! graph._db) return callback();
+    if (! graph._connection) return callback();
 
-    // close the database, and once done clear the _db member
-    graph._db.close(function() {
-        graph._db = undefined;
-
-        // pass the callback through
-        callback.apply(this, arguments);
-    });
+    // TODO: close the connection
+    graph._connection = undefined;
+    callback();
 };
 
 /* operation definitions */
@@ -152,18 +136,17 @@ exports.find = function(graph, searchParams, opts, callback) {
 };
 
 exports.getEdge = function(graph, source, target, edgeType, callback) {
-    var db = graph._db,
-        command = templates.selectEdge({
+    var command = templates.selectEdge({
             type: edgeType || 'OGraphEdge',
             source: source,
             target: target
         });
 
     // if we don't have a db connection, abort the operation
-    if (! db) return callback(errors.NOT_CONNECTED);
+    if (! graph._connection) return callback(errors.NOT_CONNECTED);
 
     // look for the node details
-    sendCommand(db, command, function(err, results) {
+    sendCommand(graph._connection, command, function(err, results) {
         callback(err, (results || [])[0]);
     });
 };
@@ -172,10 +155,8 @@ exports.getEdge = function(graph, source, target, edgeType, callback) {
 ## saveNode(graph, node, callback)
 */
 exports.saveNode = function(graph, node, callback) {
-    var db = graph._db;
-
     // if we don't have a db connection, abort the operation
-    if (! db) return callback(new Error(errors.NOT_CONNECTED));
+    if (! graph._connection) return callback(new Error(errors.NOT_CONNECTED));
 
     // if we don't have node data, then report an invalid node
     if (! node.data) return callback(new Error('A node object is require for a save operation'));
@@ -186,26 +167,24 @@ exports.saveNode = function(graph, node, callback) {
     // look for an existing node
     findById(graph, node.data.id, node.type, function(err, results) {
         var existing = (! err) && results.length > 0,
-            commandTemplate = templates[results.length > 0 ? 'update' : 'vertexCreate'],
-            data = _.omit(node.data, results.length > 0 ? ['id'] : []),
+            commandTemplate = templates[existing ? 'update' : 'vertexCreate'],
+            data = _.omit(node.data, existing ? ['id'] : []),
                 commandText = commandTemplate({
                     type: node.type,
-                sqlsets: orientParser.hashToSQLSets(data).sqlsets,
+                sqlsets: orienteer.objectTo('SET', data),
                 id: existing && results[0].id
             });
 
         if (err) return callback(err);
 
         // run the command
-        sendCommand(db, commandText, callback);
+        sendCommand(graph._connection, commandText, callback);
     });
 };
 
 exports.saveEdge = function(graph, source, target, entity, callback) {
-    var db = graph._db;
-
     // if we don't have a db connection, abort the operation
-    if (! db) return callback(new Error(errors.NOT_CONNECTED));
+    if (! graph._connection) return callback(new Error(errors.NOT_CONNECTED));
 
     // if we don't have node data, then report an invalid node
     if (! entity.data) return callback(new Error('A valid entity is require for a save operation'));
@@ -216,7 +195,7 @@ exports.saveEdge = function(graph, source, target, entity, callback) {
             data = _.omit(entity.data, existing ? ['id'] : []),
             commandText = commandTemplate({
                 type: entity.type || 'OGraphEdge',
-                sqlsets: orientParser.hashToSQLSets(data).sqlsets,
+                sqlsets: orienteer.objectTo('SET', data),
                 source: source,
                 target: target,
                 id: existing && existing.id
@@ -225,7 +204,7 @@ exports.saveEdge = function(graph, source, target, entity, callback) {
         if (err) return callback(err);
 
         // run the command
-        sendCommand(db, commandText, callback);
+        sendCommand(graph._connection, commandText, callback);
     });
 };
 
@@ -239,27 +218,17 @@ properly defined within orient.  Within orient, there is a notion of classes
 that provide some aspect of types.
 */
 function activateType(graph, definition, baseClass, callback) {
-    var db = graph._db,
-        className = definition.type;
+    var className = definition.type;
 
     // if we don't have a db connection, abort the operation
-    if (! db) return callback(errors.NOT_CONNECTED);
+    if (! graph._connection) return callback(errors.NOT_CONNECTED);
 
-    // attempt to create the class
-    db.createClass(className, baseClass, function(err) {
-        // if we encountered an error, let's flag that type as existing
-        // so we do not attempt to create it again
-        if (err) {
-            definition.active = true;
-            return callback();
-        }
-
-        // execute the following commands in series
-        commands.series([
-            'CREATE PROPERTY ' + className + '.id STRING',
-            'CREATE INDEX ' + className + '.id UNIQUE'
-        ], db, callback);
-    });
+    // create the class and required properties
+    commands.series([
+        'CREATE CLASS ' + className + ' EXTENDS ' + baseClass,
+        'CREATE PROPERTY ' + className + '.id STRING',
+        'CREATE INDEX ' + className + '.id UNIQUE'
+    ], graph._connection, callback);
 }
 
 /**
@@ -283,14 +252,13 @@ function debuggable(callback) {
 The findById function is used internally to find a specific object by id.
 */
 function findById(graph, id, className, callback) {
-    var db = graph._db,
-        command = templates.selectById({ type: className, id: id });
+    var command = templates.selectById({ type: className, id: id });
 
     // if we don't have a db connection, abort the operation
-    if (! db) return callback(errors.NOT_CONNECTED);
+    if (! graph._connection) return callback(errors.NOT_CONNECTED);
 
     // look for the node details
-    sendCommand(db, command, callback);
+    sendCommand(graph._connection, command, callback);
 }
 
 /**
@@ -299,9 +267,9 @@ function findById(graph, id, className, callback) {
 The sendCommand function is used internally to provide debug tracking on the commands
 send to orientdb
 */
-function sendCommand(db, command, callback) {
+function sendCommand(connection, command, callback) {
     orientDebug(command);
-    db.command(command, function(err, results) {
+    connection.sql(command, function(err, results) {
         if (err) orientDebug('error: ', err);
         callback.apply(this, arguments);
     });
@@ -318,12 +286,12 @@ the targetdb.
 As per the series command, except the commands are executed in parallel
 */
 ['series', 'parallel'].forEach(function(op) {
-    commands[op] = function(commands, targetDb, callback) {
+    commands[op] = function(commands, connection, callback) {
         // create the bound command calls
         var boundCommands = commands.map(function(command) {
             return function(commandCallback) {
                 orientDebug(command);
-                targetDb.command(command, commandCallback);
+                connection.sql(command, commandCallback);
             };
         });
 
