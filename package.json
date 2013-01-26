@@ -3,7 +3,7 @@
   "description": "OrientDB connector for graphdb node module",
   "author": "Damon Oehlman <damon.oehlman@sidelab.com>",
   "tags": [],
-  "version": "0.2.1",
+  "version": "0.2.2",
   "engines": {
     "node": ">= 0.8.x < 0.9.0"
   },
