@@ -35,6 +35,10 @@ exports.defineBaseTypes = function(types) {
     types.define('uuid').alias('string');
     types.define('integer');
     types.define('float');
+
+    // define some of the orient list and set types
+    types.define('list').alias('embeddedlist');
+    types.define('set').alias('embeddedset');
 };
 
 /**
