@@ -1,30 +1,25 @@
 {
   "name": "graphdb-orient",
   "description": "OrientDB connector for graphdb node module",
-  "author": "Damon Oehlman <damon.oehlman@sidelab.com>",
-  "tags": [],
+  "author": "Damon Oehlman <damon.oehlman@gmail.com>",
   "version": "0.2.2",
-  "engines": {
-    "node": ">= 0.8.x < 0.9.0"
-  },
   "dependencies": {
-    "async": "0.1.x",
+    "async": "0.2.x",
     "debug": "*",
-    "orienteer": "0.1.x",
-    "underscore": "1.4.x"
+    "orienteer": "0.2.x",
+    "underscore": "1.5.x"
   },
   "devDependencies": {
     "mocha": "1.7.x"
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/DamonOehlman/graphdb.git"
+    "url": "https://bitbucket.org/DamonOehlman/graphdb.git"
   },
   "bugs": {
-    "url": "http://github.com/DamonOehlman/graphdb/issues"
+    "url": "https://bitbucket.org/DamonOehlman/graphdb/issues"
   },
   "scripts": {
-    "test": "./node_modules/.bin/mocha --reporter spec"
-  },
-  "contributors": []
+    "test": "$(npm bin)/mocha --reporter spec"
+  }
 }
