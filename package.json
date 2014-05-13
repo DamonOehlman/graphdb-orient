@@ -6,7 +6,7 @@
   "dependencies": {
     "async": "~0.8",
     "debug": "*",
-    "orienteer": "~0.2",
+    "orienteer": "~0.3",
     "underscore": "^1"
   },
   "devDependencies": {
