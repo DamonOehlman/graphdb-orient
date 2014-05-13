@@ -4,13 +4,13 @@
   "author": "Damon Oehlman <damon.oehlman@gmail.com>",
   "version": "0.2.2",
   "dependencies": {
-    "async": "0.1.x",
+    "async": "~0.8",
     "debug": "*",
-    "orienteer": "0.1.x",
-    "underscore": "1.4.x"
+    "orienteer": "~0.2",
+    "underscore": "^1"
   },
   "devDependencies": {
-    "mocha": "1.7.x"
+    "mocha": "^1"
   },
   "repository": {
     "type": "git",
