@@ -2,7 +2,7 @@
   "name": "graphdb-orient",
   "description": "OrientDB connector for graphdb node module",
   "author": "Damon Oehlman <damon.oehlman@gmail.com>",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "dependencies": {
     "async": "~0.8",
     "debug": "*",
