@@ -10,6 +10,20 @@ var _ = require('underscore');
 
   OrientDB adapter for the graphdb module.
 
+  ## Usage
+
+  Designed to be used in conjunction with the
+  [graphdb](https://github.com/DamonOehlman/graphdb) module:
+
+  ```js
+  var graphdb = require('graphdb');
+  var graph = graphdb({ connector: 'orient' });
+  ```
+
+  More information can be found in the graphdb tests:
+
+  https://github.com/DamonOehlman/graphdb/blob/master/test/helpers/connect-opts.js
+
 **/
 
 var DEFAULT_TYPE_VERTEX = 'V';
